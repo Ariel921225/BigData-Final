@@ -1,0 +1,47 @@
+from pyspark.sql.types import *
+from pyspark.sql import Row
+import pandas
+import pyspark.mllib
+import pyspark.mllib.regression
+from pyspark.mllib.regression import LabeledPoint
+from pyspark.sql.functions import *
+from pyspark.mllib.util import MLUtils
+from pyspark.mllib.linalg import Vectors
+from pyspark.mllib.feature import StandardScaler
+
+# rdd
+rdd = sc.textFile('/FileStore/tables/iwtw4wqf1494194855540/data.csv')
+rdd = rdd.map(lambda line: line.split(","))
+header = rdd.first()
+rdd = rdd.filter(lambda line:line != header)
+
+df = rdd.map(lambda line: Row(record_type = line[3], state_group = line[6], group_size = line[9], homeowner = line[10],car_age = line[11],risk_factor = line [13], married_couple = line[16], C_previous = line[17], duration_previous = line[18], cost = line[26], stategroup=line[34], timeofday=line[29],weekend=line[30],family=line[31],individual=line[33], A = line[18]))
+temp = df.map(lambda line:LabeledPoint(line[0],[line[1:]]))
+
+# labeling and scale
+features = df.map(lambda row: row[1:])
+standardizer = StandardScaler()
+model = standardizer.fit(features)
+features_transform = model.transform(features)
+features_transform.take(5)
+lab = df.map(lambda row: row[0])
+transformedData = lab.zip(features_transform)
+transformedData = transformedData.map(lambda row: LabeledPoint(row[0],[row[1]]))
+
+# partition
+trainingData, testingData = transformedData.randomSplit([.8,.2],seed=12345)
+
+# modeling
+from pyspark.mllib.classification import LogisticRegressionWithLBFGS, LogisticRegressionModel
+lrModel = LogisticRegressionWithLBFGS.train(trainingData, 1000, numClasses = 3)
+
+# testing
+from pyspark.mllib.evaluation import RegressionMetrics
+prediObserRDDin = trainingData.map(lambda row: (float(lrModel.predict(row.features[0])),row.label))
+metrics = RegressionMetrics(prediObserRDDin)
+metrics.meanAbsoluteError
+
+prediObserRDDout = testingData.map(lambda row: (float(lrModel.predict(row.features[0])),row.label))
+metrics = RegressionMetrics(prediObserRDDout)
+#r2
+metrics.r2
